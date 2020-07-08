@@ -71,8 +71,8 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
-import android.support.v4.app.ListFragment;
-import android.support.v7.app.AppCompatActivity;
+import androidx.fragment.app.ListFragment;
+import androidx.appcompat.app.AppCompatActivity;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -112,8 +112,11 @@ implements AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener,
 
         setContentView(R.layout.activity_server_list);
         getListFragment().setListAdapter(adapter);
+        getListFragment().setEmptyText(getString(R.string.server_list_empty));
         getListFragment().getListView().setOnItemClickListener(this);
         getListFragment().getListView().setOnItemLongClickListener(this);
+
+        setTitle(R.string.title_activity_server_list);
     }
 
     @Override
@@ -644,8 +647,8 @@ implements AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener,
                 
         TextView tv_version = (TextView)findViewById(R.id.version_textview);
         TextView tv_dllversion = (TextView)findViewById(R.id.dllversion_textview);
-        tv_version.setText("TeamTalk v. " + version + AppInfo.APPVERSION_POSTFIX);
-        tv_dllversion.setText("TeamTalk DLL v." + TeamTalkBase.getVersion());
+        tv_version.setText(getString(R.string.ttversion) + version + AppInfo.APPVERSION_POSTFIX);
+        tv_dllversion.setText(getString(R.string.ttdllversion) + TeamTalkBase.getVersion());
 
         new VersionCheckAsyncTask().execute();
     }
