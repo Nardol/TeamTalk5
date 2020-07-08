@@ -33,7 +33,5 @@ CONFIG(release, debug|release) {
     }
 }
 
-@
-QMAKE_POST_LINK = lrelease teamtalk5.pro
-@
-
+localize.commands += lrelease teamtalk5.pro;
+QMAKE_EXTRA_TARGETS += localize
