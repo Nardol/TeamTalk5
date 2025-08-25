@@ -33,7 +33,9 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QProcess>
+#if defined(Q_OS_LINUX)
+#include <QtDBus/QtDBus>
+#endif
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QDesktopWidget>
 #include <QApplication>
@@ -851,14 +853,43 @@ void showNotification(const QString &title, const QString &message)
 #elif defined(Q_OS_LINUX)
 void showNotification(const QString &title, const QString &message)
 {
+    QDBusInterface iface(
+        LINUX_NOTIFY_SERVICE,
+        LINUX_NOTIFY_PATH,
+        LINUX_NOTIFY_INTERFACE,
+        QDBusConnection::sessionBus());
+
+    if (!iface.isValid())
+        return;
+
+    QVariantMap hints;
+    // urgency: low (byte 0)
+    hints.insert("urgency", QVariant::fromValue(static_cast<uchar>(LINUX_NOTIFY_URGENCY_LOW)));
+
+    QDBusMessage msg = QDBusMessage::createMethodCall(
+        LINUX_NOTIFY_SERVICE,
+        LINUX_NOTIFY_PATH,
+        LINUX_NOTIFY_INTERFACE,
+        "Notify");
+
+    // Keep same behavior as notify-send invocation:
+    // - app_name = title (used with -a)
+    // - summary = "APPNAME_SHORT: <message-without-quotes>"
+    // - body = empty
     QString noquote = message;
     noquote.replace('"', ' ');
-    QStringList arguments;
-    arguments << "-t" << "500" 
-            << "-a" << title
-            << "-u" << "low"
-            << QString("%1: %2").arg(APPNAME_SHORT, noquote);
+    QString summary = QString("%1: %2").arg(APPNAME_SHORT, noquote);
 
-    QProcess::startDetached(NOTIFY_PATH, arguments);
+    // app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout(ms)
+    msg << title
+        << static_cast<uint>(0)
+        << QString("")
+        << summary
+        << QString("")
+        << QStringList()
+        << hints
+        << LINUX_NOTIFY_EXPIRE_MS; // milliseconds
+
+    QDBusConnection::sessionBus().call(msg, QDBus::NoBlock);
 }
 #endif
