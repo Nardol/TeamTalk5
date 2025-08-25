@@ -76,16 +76,16 @@
 #include <QTextToSpeech>
 #endif
 
+#if defined(Q_OS_LINUX)
+#include <QtDBus/QtDBus>
+#endif /*Q_OS_LINUX */
+
 #if defined(Q_OS_LINUX) //For hotkeys on X11
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QX11Info>
 #endif
-#endif /*Q_OS_LINUX */
-
-#if defined(Q_OS_LINUX)
-#include <QtDBus/QtDBus>
 #endif /*Q_OS_LINUX */
 
 #include <functional>
