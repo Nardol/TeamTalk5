@@ -160,6 +160,8 @@ constexpr const char* LINUX_NOTIFY_PATH = "/org/freedesktop/Notifications";
 constexpr const char* LINUX_NOTIFY_INTERFACE = "org.freedesktop.Notifications";
 constexpr int LINUX_NOTIFY_EXPIRE_MS = 500; // match previous notify-send -t 500
 constexpr unsigned char LINUX_NOTIFY_URGENCY_LOW = 0; // match notify-send -u low
+
+bool linuxNotificationsServiceAvailable();
 #endif
 
 void setVideoTextBox(const QRect& rect, const QColor& bgcolor,
