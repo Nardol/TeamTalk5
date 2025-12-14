@@ -76,6 +76,10 @@
 #include <QTextToSpeech>
 #endif
 
+#if defined(Q_OS_LINUX)
+#include <QtDBus/QtDBus>
+#endif /*Q_OS_LINUX */
+
 #if defined(Q_OS_LINUX) //For hotkeys on X11
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -887,10 +891,19 @@ void MainWindow::initialScreenReaderSetup()
 #if defined(ENABLE_TOLK)
                 ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_TOLK);
 #elif defined(Q_OS_LINUX)
-                if (QFile::exists(NOTIFY_PATH))
-                    ttSettings->setValue(SETTINGS_TTS_TOAST, true);
-                else
-                    ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_QT);
+                // Prefer toast notifications when the org.freedesktop.Notifications
+                // service is available on the D-Bus session bus. Fallback to Qt TTS otherwise.
+                {
+                    QDBusInterface iface(
+                        "org.freedesktop.Notifications",
+                        "/org/freedesktop/Notifications",
+                        "org.freedesktop.Notifications",
+                        QDBusConnection::sessionBus());
+                    if (iface.isValid())
+                        ttSettings->setValue(SETTINGS_TTS_TOAST, true);
+                    else
+                        ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_QT);
+                }
 #endif
                 ttSettings->setValue(SETTINGS_DISPLAY_VU_METER_UPDATES, false);
             }
