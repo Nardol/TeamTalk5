@@ -897,7 +897,11 @@ void MainWindow::initialScreenReaderSetup()
                 else
                 {
                     ttSettings->setValue(SETTINGS_TTS_TOAST, false);
+#if defined(QT_TEXTTOSPEECH_LIB)
                     ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_QT);
+#else
+                    ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_NONE);
+#endif
                 }
 #endif
                 ttSettings->setValue(SETTINGS_DISPLAY_VU_METER_UPDATES, false);
