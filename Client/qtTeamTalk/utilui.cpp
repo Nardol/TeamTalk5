@@ -71,7 +71,14 @@ bool linuxNotificationsServiceAvailable()
         return false;
 
     QCoreApplication* app = QCoreApplication::instance();
-    Q_UNUSED(app);
+    if (app && QThread::currentThread() != app->thread())
+    {
+        bool result = false;
+        QMetaObject::invokeMethod(app, [&result]() {
+            result = linuxNotificationsServiceAvailableImpl();
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    }
 
     return linuxNotificationsServiceAvailableImpl();
 }
@@ -927,8 +934,6 @@ void showNotification(const QString& title, const QString& message)
         const QString titleCopy = title;
         const QString messageCopy = message;
         QMetaObject::invokeMethod(app, [titleCopy, messageCopy]() {
-            if (QCoreApplication::closingDown())
-                return;
             showNotificationImpl(titleCopy, messageCopy);
         }, Qt::QueuedConnection);
         return;
