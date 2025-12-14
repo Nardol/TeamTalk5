@@ -35,7 +35,6 @@
 #include <QHBoxLayout>
 #if defined(Q_OS_LINUX)
 #include <QCoreApplication>
-#include <QDebug>
 #include <QThread>
 #include <QtDBus/QtDBus>
 #endif
@@ -50,6 +49,25 @@
 extern TTInstance* ttInst;
 extern NonDefaultSettings* ttSettings;
 extern QTranslator* ttTranslator;
+
+#if defined(Q_OS_LINUX)
+bool linuxNotificationsServiceAvailable()
+{
+    if (QCoreApplication::closingDown())
+        return false;
+
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected())
+        return false;
+
+    QDBusConnectionInterface* dbus = bus.interface();
+    if (!dbus)
+        return false;
+
+    QDBusReply<bool> registered = dbus->isServiceRegistered(QLatin1String(LINUX_NOTIFY_SERVICE));
+    return registered.isValid() && registered.value();
+}
+#endif
 
 void migrateSettings()
 {
@@ -856,20 +874,14 @@ void showNotification(const QString &title, const QString &message)
 #elif defined(Q_OS_LINUX)
 static void showNotificationImpl(const QString& title, const QString& message)
 {
-    constexpr const char* DBUS_NOTIFY_SERVICE = "org.freedesktop.Notifications";
-    constexpr const char* DBUS_NOTIFY_PATH = "/org/freedesktop/Notifications";
-    constexpr const char* DBUS_NOTIFY_INTERFACE = "org.freedesktop.Notifications";
-    constexpr int DBUS_NOTIFY_EXPIRE_MS = 500; // match previous notify-send -t 500
-    constexpr unsigned char DBUS_NOTIFY_URGENCY_LOW = 0; // match notify-send -u low
-
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
         return;
 
     QDBusInterface iface(
-        DBUS_NOTIFY_SERVICE,
-        DBUS_NOTIFY_PATH,
-        DBUS_NOTIFY_INTERFACE,
+        LINUX_NOTIFY_SERVICE,
+        LINUX_NOTIFY_PATH,
+        LINUX_NOTIFY_INTERFACE,
         bus);
 
     if (!iface.isValid())
@@ -877,21 +889,19 @@ static void showNotificationImpl(const QString& title, const QString& message)
 
     QVariantMap hints;
     // urgency: low (byte 0)
-    hints.insert("urgency", QVariant::fromValue(static_cast<uchar>(DBUS_NOTIFY_URGENCY_LOW)));
+    hints.insert("urgency", QVariant::fromValue(static_cast<uchar>(LINUX_NOTIFY_URGENCY_LOW)));
 
     QDBusMessage msg = QDBusMessage::createMethodCall(
-        DBUS_NOTIFY_SERVICE,
-        DBUS_NOTIFY_PATH,
-        DBUS_NOTIFY_INTERFACE,
+        LINUX_NOTIFY_SERVICE,
+        LINUX_NOTIFY_PATH,
+        LINUX_NOTIFY_INTERFACE,
         "Notify");
 
     // Keep same behavior as notify-send invocation:
     // - app_name = title (used with -a)
     // - summary = "APPNAME_SHORT: <message-without-quotes>"
     // - body = empty
-    QString noquote = message;
-    noquote.replace('"', ' ');
-    QString summary = QString("%1: %2").arg(APPNAME_SHORT, noquote);
+    QString summary = QString("%1: %2").arg(APPNAME_SHORT, message);
 
     // app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout(ms)
     msg << title
@@ -901,7 +911,7 @@ static void showNotificationImpl(const QString& title, const QString& message)
         << QString("")
         << QStringList()
         << hints
-        << DBUS_NOTIFY_EXPIRE_MS; // milliseconds
+        << LINUX_NOTIFY_EXPIRE_MS; // milliseconds
 
     if (!bus.send(msg))
         qWarning() << "Failed to send D-Bus notification:" << bus.lastError().message();
