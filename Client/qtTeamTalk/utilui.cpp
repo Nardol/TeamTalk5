@@ -34,6 +34,9 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #if defined(Q_OS_LINUX)
+#include <QCoreApplication>
+#include <QDebug>
+#include <QThread>
 #include <QtDBus/QtDBus>
 #endif
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
@@ -851,7 +854,7 @@ void showNotification(const QString &title, const QString &message)
     }
 }
 #elif defined(Q_OS_LINUX)
-void showNotification(const QString &title, const QString &message)
+static void showNotificationImpl(const QString& title, const QString& message)
 {
     constexpr const char* DBUS_NOTIFY_SERVICE = "org.freedesktop.Notifications";
     constexpr const char* DBUS_NOTIFY_PATH = "/org/freedesktop/Notifications";
@@ -859,11 +862,15 @@ void showNotification(const QString &title, const QString &message)
     constexpr int DBUS_NOTIFY_EXPIRE_MS = 500; // match previous notify-send -t 500
     constexpr unsigned char DBUS_NOTIFY_URGENCY_LOW = 0; // match notify-send -u low
 
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected())
+        return;
+
     QDBusInterface iface(
         DBUS_NOTIFY_SERVICE,
         DBUS_NOTIFY_PATH,
         DBUS_NOTIFY_INTERFACE,
-        QDBusConnection::sessionBus());
+        bus);
 
     if (!iface.isValid())
         return;
@@ -896,6 +903,28 @@ void showNotification(const QString &title, const QString &message)
         << hints
         << DBUS_NOTIFY_EXPIRE_MS; // milliseconds
 
-    QDBusConnection::sessionBus().call(msg, QDBus::NoBlock);
+    if (!bus.send(msg))
+        qWarning() << "Failed to send D-Bus notification:" << bus.lastError().message();
+}
+
+void showNotification(const QString& title, const QString& message)
+{
+    QCoreApplication* app = QCoreApplication::instance();
+    if (!app || QCoreApplication::closingDown())
+        return;
+
+    if (QThread::currentThread() != app->thread())
+    {
+        const QString titleCopy = title;
+        const QString messageCopy = message;
+        QMetaObject::invokeMethod(app, [titleCopy, messageCopy]() {
+            if (QCoreApplication::closingDown())
+                return;
+            showNotificationImpl(titleCopy, messageCopy);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    showNotificationImpl(title, message);
 }
 #endif
