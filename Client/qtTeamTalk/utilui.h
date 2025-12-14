@@ -153,9 +153,7 @@ enum VideoText
     VIDTEXT_SHOW_STATUSTEXT          = 0x0040,
 };
 
-#if defined(Q_OS_LINUX)
 #define NOTIFY_PATH "/usr/bin/notify-send"
-#endif
 
 void setVideoTextBox(const QRect& rect, const QColor& bgcolor,
                      const QColor& fgcolor, const QString& text,
