@@ -51,8 +51,12 @@ extern NonDefaultSettings* ttSettings;
 extern QTranslator* ttTranslator;
 
 #if defined(Q_OS_LINUX)
-static bool linuxNotificationsServiceAvailableImpl()
+bool linuxNotificationsServiceAvailable()
 {
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app && QThread::currentThread() != app->thread())
+        return false;
+
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
         return false;
@@ -63,24 +67,6 @@ static bool linuxNotificationsServiceAvailableImpl()
 
     QDBusReply<bool> registered = dbus->isServiceRegistered(QLatin1String(LINUX_NOTIFY_SERVICE));
     return registered.isValid() && registered.value();
-}
-
-bool linuxNotificationsServiceAvailable()
-{
-    if (QCoreApplication::closingDown())
-        return false;
-
-    QCoreApplication* app = QCoreApplication::instance();
-    if (app && QThread::currentThread() != app->thread())
-    {
-        bool result = false;
-        QMetaObject::invokeMethod(app, [&result]() {
-            result = linuxNotificationsServiceAvailableImpl();
-        }, Qt::BlockingQueuedConnection);
-        return result;
-    }
-
-    return linuxNotificationsServiceAvailableImpl();
 }
 #endif
 
