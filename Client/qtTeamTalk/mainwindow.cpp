@@ -890,15 +890,9 @@ void MainWindow::initialScreenReaderSetup()
                 // Prefer toast notifications when the org.freedesktop.Notifications
                 // service is available on the D-Bus session bus. Fallback to Qt TTS otherwise.
                 if (linuxNotificationsServiceAvailable())
-                {
                     ttSettings->setValue(SETTINGS_TTS_TOAST, true);
-                    ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_NONE);
-                }
                 else
-                {
-                    ttSettings->setValue(SETTINGS_TTS_TOAST, false);
                     ttSettings->setValue(SETTINGS_TTS_ENGINE, TTSENGINE_QT);
-                }
 #endif
                 ttSettings->setValue(SETTINGS_DISPLAY_VU_METER_UPDATES, false);
             }
