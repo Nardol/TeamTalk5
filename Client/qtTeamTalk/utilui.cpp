@@ -53,6 +53,10 @@ extern QTranslator* ttTranslator;
 #if defined(Q_OS_LINUX)
 bool linuxNotificationsServiceAvailable()
 {
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app && QThread::currentThread() != app->thread())
+        return false;
+
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
         return false;
@@ -903,7 +907,8 @@ static void showNotificationImpl(const QString& title, const QString& message)
         << hints
         << LINUX_NOTIFY_EXPIRE_MS; // milliseconds
 
-    bus.send(msg);
+    if (!bus.send(msg))
+        qWarning() << "Failed to send D-Bus notification:" << bus.lastError().message();
 }
 
 void showNotification(const QString& title, const QString& message)
