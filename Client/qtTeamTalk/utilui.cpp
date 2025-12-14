@@ -907,7 +907,9 @@ static void showNotificationImpl(const QString& title, const QString& message)
     // - app_name = title (used with -a)
     // - summary = "APPNAME_SHORT: <message-without-quotes>"
     // - body = empty
-    QString summary = QString("%1: %2").arg(APPNAME_SHORT, message);
+    QString noquote = message;
+    noquote.replace('"', ' ');
+    QString summary = QString("%1: %2").arg(APPNAME_SHORT, noquote);
 
     // app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout(ms)
     msg << title
