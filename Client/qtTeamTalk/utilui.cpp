@@ -34,8 +34,6 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #if defined(Q_OS_LINUX)
-#include <QCoreApplication>
-#include <QThread>
 #include <QtDBus/QtDBus>
 #endif
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
@@ -49,22 +47,6 @@
 extern TTInstance* ttInst;
 extern NonDefaultSettings* ttSettings;
 extern QTranslator* ttTranslator;
-
-#if defined(Q_OS_LINUX)
-bool linuxNotificationsServiceAvailable()
-{
-    QDBusConnection bus = QDBusConnection::sessionBus();
-    if (!bus.isConnected())
-        return false;
-
-    QDBusConnectionInterface* dbus = bus.interface();
-    if (!dbus)
-        return false;
-
-    QDBusReply<bool> registered = dbus->isServiceRegistered(QLatin1String(LINUX_NOTIFY_SERVICE));
-    return registered.isValid() && registered.value();
-}
-#endif
 
 void migrateSettings()
 {
@@ -869,10 +851,15 @@ void showNotification(const QString &title, const QString &message)
     }
 }
 #elif defined(Q_OS_LINUX)
-static void showNotificationImpl(const QString& title, const QString& message)
+void showNotification(const QString &title, const QString &message)
 {
-    QDBusConnection bus = QDBusConnection::sessionBus();
-    if (!bus.isConnected())
+    QDBusInterface iface(
+        LINUX_NOTIFY_SERVICE,
+        LINUX_NOTIFY_PATH,
+        LINUX_NOTIFY_INTERFACE,
+        QDBusConnection::sessionBus());
+
+    if (!iface.isValid())
         return;
 
     QVariantMap hints;
@@ -903,25 +890,6 @@ static void showNotificationImpl(const QString& title, const QString& message)
         << hints
         << LINUX_NOTIFY_EXPIRE_MS; // milliseconds
 
-    bus.send(msg);
-}
-
-void showNotification(const QString& title, const QString& message)
-{
-    QCoreApplication* app = QCoreApplication::instance();
-    if (!app || QCoreApplication::closingDown())
-        return;
-
-    if (QThread::currentThread() != app->thread())
-    {
-        const QString titleCopy = title;
-        const QString messageCopy = message;
-        QMetaObject::invokeMethod(app, [titleCopy, messageCopy]() {
-            showNotificationImpl(titleCopy, messageCopy);
-        }, Qt::QueuedConnection);
-        return;
-    }
-
-    showNotificationImpl(title, message);
+    QDBusConnection::sessionBus().call(msg, QDBus::NoBlock);
 }
 #endif
