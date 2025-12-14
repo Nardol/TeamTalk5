@@ -154,12 +154,7 @@ enum VideoText
 };
 
 #if defined(Q_OS_LINUX)
-// org.freedesktop.Notifications D-Bus constants (Linux)
-constexpr const char* LINUX_NOTIFY_SERVICE = "org.freedesktop.Notifications";
-constexpr const char* LINUX_NOTIFY_PATH = "/org/freedesktop/Notifications";
-constexpr const char* LINUX_NOTIFY_INTERFACE = "org.freedesktop.Notifications";
-constexpr int LINUX_NOTIFY_EXPIRE_MS = 500; // match previous notify-send -t 500
-constexpr unsigned char LINUX_NOTIFY_URGENCY_LOW = 0; // match notify-send -u low
+#define NOTIFY_PATH "/usr/bin/notify-send"
 #endif
 
 void setVideoTextBox(const QRect& rect, const QColor& bgcolor,

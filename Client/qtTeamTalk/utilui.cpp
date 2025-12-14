@@ -853,10 +853,16 @@ void showNotification(const QString &title, const QString &message)
 #elif defined(Q_OS_LINUX)
 void showNotification(const QString &title, const QString &message)
 {
+    constexpr const char* NOTIFY_SERVICE = "org.freedesktop.Notifications";
+    constexpr const char* NOTIFY_PATH = "/org/freedesktop/Notifications";
+    constexpr const char* NOTIFY_INTERFACE = "org.freedesktop.Notifications";
+    constexpr int NOTIFY_EXPIRE_MS = 500; // match previous notify-send -t 500
+    constexpr unsigned char NOTIFY_URGENCY_LOW = 0; // match notify-send -u low
+
     QDBusInterface iface(
-        LINUX_NOTIFY_SERVICE,
-        LINUX_NOTIFY_PATH,
-        LINUX_NOTIFY_INTERFACE,
+        NOTIFY_SERVICE,
+        NOTIFY_PATH,
+        NOTIFY_INTERFACE,
         QDBusConnection::sessionBus());
 
     if (!iface.isValid())
@@ -864,12 +870,12 @@ void showNotification(const QString &title, const QString &message)
 
     QVariantMap hints;
     // urgency: low (byte 0)
-    hints.insert("urgency", QVariant::fromValue(static_cast<uchar>(LINUX_NOTIFY_URGENCY_LOW)));
+    hints.insert("urgency", QVariant::fromValue(static_cast<uchar>(NOTIFY_URGENCY_LOW)));
 
     QDBusMessage msg = QDBusMessage::createMethodCall(
-        LINUX_NOTIFY_SERVICE,
-        LINUX_NOTIFY_PATH,
-        LINUX_NOTIFY_INTERFACE,
+        NOTIFY_SERVICE,
+        NOTIFY_PATH,
+        NOTIFY_INTERFACE,
         "Notify");
 
     // Keep same behavior as notify-send invocation:
@@ -888,7 +894,7 @@ void showNotification(const QString &title, const QString &message)
         << QString("")
         << QStringList()
         << hints
-        << LINUX_NOTIFY_EXPIRE_MS; // milliseconds
+        << NOTIFY_EXPIRE_MS; // milliseconds
 
     QDBusConnection::sessionBus().call(msg, QDBus::NoBlock);
 }
