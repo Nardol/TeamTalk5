@@ -35,9 +35,13 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.media.AudioManager;
+import android.net.ConnectivityManager;
+import android.net.DnsResolver;
+import android.net.Network;
 import android.os.AsyncTask;
 import android.os.Binder;
 import android.os.Build;
+import android.os.CancellationSignal;
 import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.IBinder;
@@ -63,9 +67,21 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Vector;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -147,6 +163,21 @@ public class TeamTalkService extends Service
     public static final String CANCEL_TRANSFER = "cancel_transfer";
 
     public static final String TAG = "bearware";
+
+    private static final int DNS_RESOLVE_TIMEOUT_MSEC = 8000;
+    private static final long DNS_CACHE_TTL_MSEC = 60_000;
+    private static final ExecutorService DNS_EXECUTOR = Executors.newCachedThreadPool();
+    private static final ConcurrentHashMap<String, CachedDns> DNS_CACHE = new ConcurrentHashMap<>();
+
+    private static final class CachedDns {
+        final long timestampMsec;
+        final String[] ips;
+
+        CachedDns(long timestampMsec, String[] ips) {
+            this.timestampMsec = timestampMsec;
+            this.ips = ips;
+        }
+    }
 
     private static final int UI_WIDGET_ID = 1;
     private static final String UI_CHANNEL_ID = "TeamtalkConnection";
@@ -633,14 +664,188 @@ public class TeamTalkService extends Service
 
         if (!setupEncryption())
             return false;
-        
-        if(!ttclient.connect(ttserver.ipaddr, ttserver.tcpport,
-                             ttserver.udpport, 0, 0, ttserver.encrypted)) {
-            ttclient.disconnect();
-            return false;
+
+        String host = (ttserver.ipaddr != null) ? ttserver.ipaddr.trim() : "";
+        String[] candidates = resolveHostCandidatesForConnect(host);
+        if (candidates.length == 0)
+            candidates = new String[] { host };
+
+        Log.i(TAG, "connect(): host=" + host + " candidates=" + Arrays.toString(candidates));
+        for (String candidate : candidates) {
+            boolean ok = ttclient.connect(candidate, ttserver.tcpport,
+                    ttserver.udpport, 0, 0, ttserver.encrypted);
+            Log.i(TAG, "connect() to " + candidate + ":" + ttserver.tcpport + " udp " + ttserver.udpport + " enc=" + ttserver.encrypted + " -> " + ok);
+            if (ok)
+                return true;
         }
-        
+
+        ttclient.disconnect();
+        return false;
+    }
+
+    private String[] resolveHostCandidatesForConnect(String rawHost) {
+        String host = normalizeHostForConnect(rawHost);
+        if (host.isEmpty())
+            return new String[0];
+
+        if (isIpLiteral(host))
+            return new String[] { host };
+
+        CachedDns cached = DNS_CACHE.get(host);
+        long now = System.currentTimeMillis();
+        if (cached != null && (now - cached.timestampMsec) < DNS_CACHE_TTL_MSEC)
+            return cached.ips;
+
+        InetAddress[] addrs = null;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                Network network = (cm != null) ? cm.getActiveNetwork() : null;
+                if (cm == null) {
+                    Log.w(TAG, "DNS: ConnectivityManager is null");
+                } else if (network == null) {
+                    Log.w(TAG, "DNS: Active Network is null");
+                }
+                if (network != null) {
+                    addrs = resolveWithDnsResolver(network, host);
+                    Log.i(TAG, "DNS: DnsResolver resolved " + host + " -> " + ((addrs != null) ? addrs.length : 0) + " addresses");
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "DNS: DnsResolver failed for host=" + host + " sdk=" + Build.VERSION.SDK_INT + " err=" + t);
+                addrs = null;
+            }
+        }
+
+        if (addrs == null || addrs.length == 0) {
+            try {
+                addrs = resolveWithInetAddress(host, DNS_RESOLVE_TIMEOUT_MSEC);
+                Log.i(TAG, "DNS: InetAddress resolved " + host + " -> " + addrs.length + " addresses");
+            } catch (Throwable t) {
+                Log.w(TAG, "DNS: InetAddress resolver failed host=" + host + " err=" + t);
+                addrs = null;
+            }
+        }
+
+        String[] ips = toOrderedIps(addrs);
+        if (ips.length == 0) {
+            Log.w(TAG, "DNS: No addresses for host=" + host + " (will fall back to hostname)");
+        } else {
+            Log.i(TAG, "DNS: Candidates for " + host + " -> " + Arrays.toString(ips));
+        }
+        DNS_CACHE.put(host, new CachedDns(now, ips));
+        return ips;
+    }
+
+    private static InetAddress[] resolveWithDnsResolver(Network network, String host) throws InterruptedException {
+        CountDownLatch latch = new CountDownLatch(1);
+        final InetAddress[][] out = new InetAddress[1][];
+        final Throwable[] err = new Throwable[1];
+        final int[] rcodeOut = new int[] { -1 };
+
+        CancellationSignal cancel = new CancellationSignal();
+        DnsResolver.getInstance().query(network, host, DnsResolver.FLAG_EMPTY, DNS_EXECUTOR, cancel,
+                new DnsResolver.Callback<java.util.List<InetAddress>>() {
+                    @Override
+                    public void onAnswer(java.util.List<InetAddress> answer, int rcode) {
+                        out[0] = (answer != null) ? answer.toArray(new InetAddress[0]) : new InetAddress[0];
+                        rcodeOut[0] = rcode;
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onError(DnsResolver.DnsException e) {
+                        err[0] = e;
+                        out[0] = new InetAddress[0];
+                        latch.countDown();
+                    }
+                });
+
+        boolean done = latch.await(DNS_RESOLVE_TIMEOUT_MSEC, TimeUnit.MILLISECONDS);
+        if (!done) {
+            cancel.cancel();
+            return new InetAddress[0];
+        }
+        if (err[0] != null) {
+            Log.w(TAG, "DNS: DnsResolver error host=" + host + " err=" + err[0]);
+            return new InetAddress[0];
+        }
+        if (rcodeOut[0] != 0) {
+            Log.w(TAG, "DNS: DnsResolver rcode=" + rcodeOut[0] + " host=" + host);
+        }
+        return (out[0] != null) ? out[0] : new InetAddress[0];
+    }
+
+    private static InetAddress[] resolveWithInetAddress(String host, int timeoutMsec) throws Exception {
+        Future<InetAddress[]> f = DNS_EXECUTOR.submit(() -> InetAddress.getAllByName(host));
+        try {
+            return f.get(timeoutMsec, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            f.cancel(true);
+            throw e;
+        }
+    }
+
+    private static String[] toOrderedIps(InetAddress[] addrs) {
+        if (addrs == null || addrs.length == 0)
+            return new String[0];
+
+        LinkedHashSet<String> uniq = new LinkedHashSet<>();
+        for (InetAddress a : addrs) {
+            if (a == null)
+                continue;
+            String s = a.getHostAddress();
+            if (s == null || s.isEmpty())
+                continue;
+            uniq.add(s);
+        }
+        return uniq.toArray(new String[0]);
+    }
+
+    private static boolean isIpLiteral(String host) {
+        // IPv6 literals contain ':'. IPv4 literals only digits + dots.
+        if (host.indexOf(':') >= 0)
+            return true;
+        for (int i = 0; i < host.length(); i++) {
+            char c = host.charAt(i);
+            if (!(c == '.' || (c >= '0' && c <= '9')))
+                return false;
+        }
         return true;
+    }
+
+    private static String normalizeHostForConnect(String rawHost) {
+        if (rawHost == null)
+            return "";
+        String trimmed = rawHost.trim();
+        if (trimmed.isEmpty())
+            return "";
+
+        // [IPv6] or [IPv6]:port
+        if (trimmed.startsWith("[")) {
+            int end = trimmed.indexOf(']');
+            if (end > 1)
+                return trimmed.substring(1, end).trim();
+            return trimmed;
+        }
+
+        // hostname:port or IPv4:port (port is already stored separately in ServerEntry)
+        int colon = trimmed.lastIndexOf(':');
+        if (colon > 0 && trimmed.indexOf(':') == colon) {
+            String suffix = trimmed.substring(colon + 1);
+            boolean allDigits = !suffix.isEmpty();
+            for (int i = 0; i < suffix.length(); i++) {
+                char c = suffix.charAt(i);
+                if (c < '0' || c > '9') {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits)
+                return trimmed.substring(0, colon).trim();
+        }
+
+        return trimmed;
     }
 
     private boolean setupEncryption() {
