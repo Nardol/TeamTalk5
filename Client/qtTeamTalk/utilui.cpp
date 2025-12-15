@@ -35,7 +35,6 @@
 #include <QHBoxLayout>
 #if defined(Q_OS_LINUX)
 #include <QCoreApplication>
-#include <QThread>
 #include <QtDBus/QtDBus>
 #endif
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
@@ -878,15 +877,6 @@ static void showNotificationImpl(const QString& title, const QString& message)
     if (!bus.isConnected())
         return;
 
-    QDBusInterface iface(
-        LINUX_NOTIFY_SERVICE,
-        LINUX_NOTIFY_PATH,
-        LINUX_NOTIFY_INTERFACE,
-        bus);
-
-    if (!iface.isValid())
-        return;
-
     QVariantMap hints;
     // urgency: low (byte 0)
     hints.insert("urgency", QVariant::fromValue(static_cast<uchar>(LINUX_NOTIFY_URGENCY_LOW)));
@@ -919,22 +909,8 @@ static void showNotificationImpl(const QString& title, const QString& message)
 
 void showNotification(const QString& title, const QString& message)
 {
-    QCoreApplication* app = QCoreApplication::instance();
-    if (!app || QCoreApplication::closingDown())
+    if (QCoreApplication::closingDown())
         return;
-
-    if (QThread::currentThread() != app->thread())
-    {
-        const QString titleCopy = title;
-        const QString messageCopy = message;
-        QMetaObject::invokeMethod(app, [titleCopy, messageCopy]() {
-            if (QCoreApplication::closingDown())
-                return;
-            showNotificationImpl(titleCopy, messageCopy);
-        }, Qt::QueuedConnection);
-        return;
-    }
-
     showNotificationImpl(title, message);
 }
 #endif
