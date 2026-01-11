@@ -164,6 +164,8 @@ public class TeamTalkService extends Service
     private boolean voxSuspended;
     private boolean permanentMuteState;
     private boolean currentMuteState;
+    private String[] connectCandidates = new String[0];
+    private int connectCandidateIndex = 0;
     private Notification widget = null;
     private NotificationManager notificationManager;
     private volatile boolean inPhoneCall;
@@ -638,24 +640,12 @@ public class TeamTalkService extends Service
 
         String[] connectHosts = DnsUtils.resolveHostCandidatesForConnect(this, ttserver.ipaddr);
         Log.i(TAG, "DNS candidates for " + ttserver.ipaddr + ": " + Arrays.toString(connectHosts));
-        boolean ok = false;
-        String chosen = (connectHosts.length > 0) ? connectHosts[0] : ttserver.ipaddr;
-        for (String host : connectHosts) {
-            chosen = host;
-            ok = ttclient.connect(host, ttserver.tcpport,
-                                  ttserver.udpport, 0, 0, ttserver.encrypted);
-            if (ok)
-                break;
+        if (connectHosts.length == 0) {
+            connectHosts = new String[] { ttserver.ipaddr };
         }
-        Log.i(TAG, "connect() to " + chosen + ":" + ttserver.tcpport +
-                   " udp " + ttserver.udpport + " enc=" + ttserver.encrypted +
-                   " -> " + ok);
-        if(!ok) {
-            ttclient.disconnect();
-            return false;
-        }
-        
-        return true;
+        connectCandidates = connectHosts;
+        connectCandidateIndex = 0;
+        return tryNextConnectCandidate();
     }
 
     private boolean setupEncryption() {
@@ -825,6 +815,7 @@ public class TeamTalkService extends Service
     public void onConnectSuccess() {
         
         assert (ttserver != null);
+        clearConnectCandidates();
 
         if (Utils.isWebLogin(ttserver.username)) {
             new WebLoginAccessToken().execute();
@@ -843,12 +834,15 @@ public class TeamTalkService extends Service
 
     @Override
     public void onConnectFailed() {
-        
+        if (tryNextConnectCandidate()) {
+            return;
+        }
+
         Log.i(TAG, "Failed to connect " + ttserver.ipaddr + ":" + ttserver.tcpport);
-        
+
         Toast.makeText(this, getResources().getString(R.string.text_con_failed),
                        Toast.LENGTH_SHORT).show();
-        
+
         createReconnectTimer(5000);
     }
 
@@ -856,6 +850,7 @@ public class TeamTalkService extends Service
     public void onConnectionLost() {
         
         Log.i(TAG, "Connection lost to " + ttserver.ipaddr + ":" + ttserver.tcpport);
+        clearConnectCandidates();
         
         activecmds.clear();
         
@@ -867,6 +862,32 @@ public class TeamTalkService extends Service
         MyTextMessage msg = MyTextMessage.createLogMsg(MyTextMessage.MSGTYPE_LOG_ERROR,
             getResources().getString(R.string.text_con_lost));
         getChatLogTextMsgs().add(msg);
+    }
+
+    private boolean tryNextConnectCandidate() {
+        if (connectCandidates == null || connectCandidateIndex >= connectCandidates.length)
+            return false;
+
+        boolean ok = false;
+        while (connectCandidateIndex < connectCandidates.length) {
+            String host = connectCandidates[connectCandidateIndex++];
+            ok = ttclient.connect(host, ttserver.tcpport,
+                                  ttserver.udpport, 0, 0, ttserver.encrypted);
+            Log.i(TAG, "connect() to " + host + ":" + ttserver.tcpport +
+                       " udp " + ttserver.udpport + " enc=" + ttserver.encrypted +
+                       " -> " + ok);
+            if (ok)
+                break;
+        }
+        if (!ok) {
+            ttclient.disconnect();
+        }
+        return ok;
+    }
+
+    private void clearConnectCandidates() {
+        connectCandidates = new String[0];
+        connectCandidateIndex = 0;
     }
 
     @Override
