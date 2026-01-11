@@ -63,6 +63,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Vector;
@@ -636,6 +637,7 @@ public class TeamTalkService extends Service
             return false;
 
         String[] connectHosts = DnsUtils.resolveHostCandidatesForConnect(this, ttserver.ipaddr);
+        Log.i(TAG, "DNS candidates for " + ttserver.ipaddr + ": " + Arrays.toString(connectHosts));
         boolean ok = false;
         String chosen = (connectHosts.length > 0) ? connectHosts[0] : ttserver.ipaddr;
         for (String host : connectHosts) {

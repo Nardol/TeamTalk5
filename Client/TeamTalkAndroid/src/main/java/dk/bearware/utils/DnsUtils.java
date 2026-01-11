@@ -58,6 +58,7 @@ public final class DnsUtils {
     private static final int DNS_UDP_TIMEOUT_MSEC = 1500;
     private static final int DNS_UDP_MAX_PACKET = 1500;
     private static final int DNS_UDP_TOTAL_TIMEOUT_MSEC = 2500;
+    private static final int DNS_INETADDR_TIMEOUT_MSEC = 5000;
     private static final long DNS_CACHE_TTL_MSEC = 60_000;
     private static final long DNS_RESOLVER_COOLDOWN_MSEC = 60_000;
 
@@ -148,8 +149,21 @@ public final class DnsUtils {
                         if (addrs == null || addrs.length == 0) {
                             // Fall through to other resolvers.
                         } else {
-                            // Respect system preference ordering from the resolver.
+                            boolean haveV4 = hasIpv4(addrs);
+                            boolean haveV6 = hasIpv6(addrs);
                             String[] ips = toOrderedIps(addrs, lp);
+
+                            // If resolver only returned one family, try UDP fallback to fill in
+                            // the missing family (e.g. IPv4 on some Android 15 setups).
+                            if ((!haveV4 || !haveV6) && lp != null) {
+                                InetAddress[] udpAddrs = resolveViaUdpDnsBlocking(normalized,
+                                        lp.getDnsServers(), lp);
+                                if (udpAddrs != null && udpAddrs.length > 0) {
+                                    String[] udpIps = toOrderedIps(udpAddrs, lp);
+                                    ips = mergeOrderedUnique(ips, udpIps);
+                                }
+                            }
+
                             if (ips.length > 0) {
                                 dnsCache.put(normalized, new CachedDns(now + DNS_CACHE_TTL_MSEC, ips));
                                 return ips;
@@ -186,7 +200,7 @@ public final class DnsUtils {
 
         // Fallback (older Android): InetAddress resolver.
         try {
-            InetAddress[] addrs = InetAddress.getAllByName(normalized);
+            InetAddress[] addrs = resolveViaInetAddressBlocking(normalized);
             if (addrs != null && addrs.length > 0) {
                 String[] ips = toOrderedIps(addrs, null);
                 if (ips.length > 0) {
@@ -257,6 +271,32 @@ public final class DnsUtils {
         }
     }
 
+    private static InetAddress[] resolveViaInetAddressBlocking(String hostname) {
+        if (hostname == null || hostname.isEmpty())
+            return null;
+
+        // Avoid NetworkOnMainThreadException: run InetAddress lookup on a background executor.
+        CountDownLatch latch = new CountDownLatch(1);
+        final InetAddress[][] out = new InetAddress[1][];
+        DNS_EXECUTOR.execute(() -> {
+            try {
+                out[0] = InetAddress.getAllByName(hostname);
+            } catch (UnknownHostException e) {
+                out[0] = null;
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        try {
+            boolean done = latch.await(DNS_INETADDR_TIMEOUT_MSEC, TimeUnit.MILLISECONDS);
+            return done ? out[0] : null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
     private static InetAddress[] resolveViaUdpDns(String hostname, List<InetAddress> dnsServers) {
         if (dnsServers == null || dnsServers.isEmpty() || hostname == null || hostname.isEmpty())
             return null;
@@ -300,6 +340,62 @@ public final class DnsUtils {
             return ips;
         String[] trimmed = new String[n];
         System.arraycopy(ips, 0, trimmed, 0, n);
+        return trimmed;
+    }
+
+    private static boolean hasIpv4(InetAddress[] addrs) {
+        if (addrs == null)
+            return false;
+        for (InetAddress a : addrs) {
+            if (a != null && a.getAddress() != null && a.getAddress().length == 4)
+                return true;
+        }
+        return false;
+    }
+
+    private static boolean hasIpv6(InetAddress[] addrs) {
+        if (addrs == null)
+            return false;
+        for (InetAddress a : addrs) {
+            if (a != null && a.getAddress() != null && a.getAddress().length == 16)
+                return true;
+        }
+        return false;
+    }
+
+    private static String[] mergeOrderedUnique(String[] primary, String[] secondary) {
+        if ((primary == null || primary.length == 0) && (secondary == null || secondary.length == 0))
+            return new String[0];
+        if (primary == null || primary.length == 0)
+            return secondary != null ? secondary : new String[0];
+        if (secondary == null || secondary.length == 0)
+            return primary;
+
+        int cap = primary.length + secondary.length;
+        String[] merged = new String[cap];
+        int n = 0;
+        for (String s : primary) {
+            if (s == null || s.isEmpty())
+                continue;
+            merged[n++] = s;
+        }
+        for (String s : secondary) {
+            if (s == null || s.isEmpty())
+                continue;
+            boolean exists = false;
+            for (int i = 0; i < n; i++) {
+                if (s.equals(merged[i])) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists)
+                merged[n++] = s;
+        }
+        if (n == merged.length)
+            return merged;
+        String[] trimmed = new String[n];
+        System.arraycopy(merged, 0, trimmed, 0, n);
         return trimmed;
     }
 
